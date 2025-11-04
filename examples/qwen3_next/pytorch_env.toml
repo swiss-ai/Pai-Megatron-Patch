@@ -1,0 +1,13 @@
+image = "/capstor/store/cscs/swissai/a06/containers/megatron_moe/qwen3_next.sqsh"
+
+# "src_path:trg_path" mounts the src_path on the host inside the container at the trg_path.
+mounts = [
+  "/iopsstor/scratch/cscs/jsun:/iopsstor/scratch/cscs/jsun", "/capstor/store/cscs/swissai:/capstor/store/cscs/swissai"
+]
+
+# The initial directory in the container.
+workdir = "/iopsstor/scratch/cscs/jsun"
+
+[annotations]
+com.hooks.aws_ofi_nccl.enabled = "true"
+com.hooks.aws_ofi_nccl.variant = "cuda12"

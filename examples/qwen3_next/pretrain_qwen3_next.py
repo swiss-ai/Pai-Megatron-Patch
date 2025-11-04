@@ -16,7 +16,9 @@ import torch
 import torch._dynamo
 
 from megatron.core.enums import ModelType
-from model_provider import model_provider as base_model_provider # Megatron-LM-250908/model_provider.py
+from model_provider import (
+    model_provider as base_model_provider,
+)  # Megatron-LM-250908/model_provider.py
 
 from megatron.training.arguments import core_transformer_config_from_args
 from megatron_patch.arguments import get_patch_args
@@ -26,18 +28,21 @@ from megatron.training import pretrain, print_rank_0
 torch._dynamo.config.suppress_errors = True
 
 
-from model_provider import count_parameters_in_layer
-from megatron.core.models.mamba import MambaModel
+from model_provider import count_parameters_in_layer 
+from megatron.core.models.mamba import MambaModel  
 from megatron.training import print_rank_0
 from megatron.training.arguments import core_transformer_config_from_args
 
-from megatron_patch.model.qwen3_next.layer_specs import get_qwen3_next_layer_spec
-from megatron_patch.model.qwen3_next.transformer_config import Qwen3NextTransformerConfig
+from megatron_patch.model.qwen3_next.layer_specs import get_qwen3_next_layer_spec  
+from megatron_patch.model.qwen3_next.transformer_config import (
+    Qwen3NextTransformerConfig,
+)  
 
 from megatron_patch.tokenizer import build_tokenizer
 
+
 def mamba_builder(args, pre_process, post_process, vp_stage=None, config=None):
-    print_rank_0('building MAMBA model ...')
+    print_rank_0("building MAMBA model ...")
     if config is None:
         config = core_transformer_config_from_args(args, Qwen3NextTransformerConfig)
     assert args.use_legacy_models is False, "Mamba only supported in Mcore!"
@@ -62,16 +67,18 @@ def mamba_builder(args, pre_process, post_process, vp_stage=None, config=None):
     )
 
     for l in range(model.decoder.num_layers_per_pipeline_rank):
-        layer_params = count_parameters_in_layer(model, f'decoder.layers.{l}.')
+        layer_params = count_parameters_in_layer(model, f"decoder.layers.{l}.")
         print_rank_0(f" == params layer {l}: {layer_params}")
 
     return model
+
 
 model_provider = partial(base_model_provider, mamba_builder)
 
 
 if __name__ == "__main__":
     from megatron_patch.template.helper import forward_step
+
     train_valid_test_datasets_provider.is_distributed = True
 
     pretrain(

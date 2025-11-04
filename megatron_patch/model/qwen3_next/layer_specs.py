@@ -1,6 +1,7 @@
 # Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
 from typing import Optional
 from megatron.core.extensions.transformer_engine import (
+    TEColumnParallelLinear,
     TEDotProductAttention,
     TELayerNormColumnParallelLinear,
     TERowParallelLinear,
@@ -14,6 +15,7 @@ from megatron.core.transformer.attention import SelfAttentionSubmodules
 from megatron.core.transformer.enums import AttnMaskType
 from megatron.core.transformer.mlp import MLPSubmodules
 from megatron.core.transformer.spec_utils import ModuleSpec
+from megatron.core.transformer.torch_layer_norm import WrappedTorchLayerNorm
 from megatron.core.transformer.transformer_layer import TransformerLayer, TransformerLayerSubmodules
 
 from megatron_patch.model.qwen3_next.gated_attention import GatedSoftmaxAttention
@@ -90,10 +92,53 @@ def get_moe_module_spec_for_backend(
 
 
 def get_qwen3_next_layer_spec(args):
-    return ModuleSpec(
-        module=MambaStack,
-        submodules=MambaStackSubmodules(
-            mamba_layer=ModuleSpec(
+    normalization_type = getattr(args, "normalization")
+
+    if normalization_type == "SeeDNorm":
+        mamba_layer = ModuleSpec(
+                module=MambaLayer,
+                submodules=MambaLayerSubmodules(
+                    norm=WrappedTorchLayerNorm,
+                    mixer=ModuleSpec(
+                        module=GatedDeltaNetMixer,
+                        submodules=MambaMixerSubmodules(
+                            in_proj=TEColumnParallelLinear, out_proj=TERowParallelLinear
+                        ),
+                    ),
+                    mamba_bda=get_bias_dropout_add,
+                ),
+            )
+        attention_layer = ModuleSpec(
+                module=TransformerLayer,
+                submodules=TransformerLayerSubmodules(
+                    input_layernorm=WrappedTorchLayerNorm,
+                    self_attention=ModuleSpec(
+                        module=GatedSoftmaxAttention,
+                        params={"attn_mask_type": AttnMaskType.causal},
+                        submodules=SelfAttentionSubmodules(
+                            linear_qkv=TEColumnParallelLinear,
+                            core_attention=TEDotProductAttention,
+                            linear_proj=TERowParallelLinear,
+                            q_layernorm=WrappedTorchLayerNorm,
+                            k_layernorm=WrappedTorchLayerNorm
+                        ),
+                    ),
+                    self_attn_bda=get_bias_dropout_add,
+                ),
+            )
+        mlp_layer = ModuleSpec(
+                module=TransformerLayer,
+                submodules=TransformerLayerSubmodules(
+                    pre_mlp_layernorm=WrappedTorchLayerNorm,
+                    mlp=get_moe_module_spec(
+                        num_experts=args.num_experts,
+                        moe_grouped_gemm=args.moe_grouped_gemm,
+                    ),
+                    mlp_bda=get_bias_dropout_add
+                ),
+            )
+    else:
+        mamba_layer = ModuleSpec(
                 module=MambaLayer,
                 submodules=MambaLayerSubmodules(
                     mixer=ModuleSpec(
@@ -104,11 +149,8 @@ def get_qwen3_next_layer_spec(args):
                     ),
                     mamba_bda=get_bias_dropout_add,
                 ),
-            ),
-            # Started with spec from gpt_layer_specs.py (with MLP removed)
-            # Using the TE spec because we had problems getting the non-TE spec
-            # working
-            attention_layer=ModuleSpec(
+            )
+        attention_layer = ModuleSpec(
                 module=TransformerLayer,
                 submodules=TransformerLayerSubmodules(
                     self_attention=ModuleSpec(
@@ -124,11 +166,8 @@ def get_qwen3_next_layer_spec(args):
                     ),
                     self_attn_bda=get_bias_dropout_add,
                 ),
-            ),
-            # Started with spec from gpt_layer_specs.py
-            # Using the TE spec because we had problems getting the non-TE spec
-            # working
-            mlp_layer = ModuleSpec(
+            )
+        mlp_layer = ModuleSpec(
                 module=TransformerLayer,
                 submodules=TransformerLayerSubmodules(
                     pre_mlp_layernorm=TENorm,
@@ -138,7 +177,20 @@ def get_qwen3_next_layer_spec(args):
                     ),
                     mlp_bda=get_bias_dropout_add
                 ),
-            ),
+            )
+
+    return ModuleSpec(
+        module=MambaStack,
+        submodules=MambaStackSubmodules(
+            mamba_layer= mamba_layer,
+            # Started with spec from gpt_layer_specs.py (with MLP removed)
+            # Using the TE spec because we had problems getting the non-TE spec
+            # working
+            attention_layer= attention_layer,
+            # Started with spec from gpt_layer_specs.py
+            # Using the TE spec because we had problems getting the non-TE spec
+            # working
+            mlp_layer = mlp_layer
         ),
     )
 

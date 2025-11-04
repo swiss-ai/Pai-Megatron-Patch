@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from megatron.core.transformer.torch_norm import SeeDNorm
 from megatron.core.activations import SSS, XSSS, SSSLU, XSSSLU
 from megatron.core.dist_checkpointing import ShardedTensor
 from megatron.core.dist_checkpointing.mapping import ReplicaId, ShardedTensorFactory
@@ -262,9 +263,15 @@ class GatedDeltaNetMixer(MegatronModule):
                         var = x.pow(2).mean(-1, keepdim=True)
                         return x * torch.rsqrt(var + self.eps) * self.weight
 
-                self.norm = RMSNorm(self.config.head_v_dim, eps=self.config.layernorm_epsilon)
+                if self.config.normalization != "SeeDNorm":
+                    self.norm = RMSNorm(self.config.head_v_dim, eps=self.config.layernorm_epsilon)
+                else:
+                    self.norm = SeeDNorm(self.config.head_v_dim, eps=self.config.layernorm_epsilon, init=self.config.seednorm_init, activation=self.config.seednorm_activation)
                 self.norm_gating = SSSLU(self.config)
             else:
+                #TODO Add support for SeeDNorm with original gating.
+                if self.config.normalization == "SeeDNorm":
+                    warnings.warn("SeeDNorm with original gating in GatedDeltaNetMixer is not supported. Using RMSNorm instead.")
                 assert RMSNormGated is not None
                 self.norm = RMSNormGated(
                     self.config.head_v_dim,
